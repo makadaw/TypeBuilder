@@ -4,7 +4,7 @@
 //
 
 /// Keep context of the current decodable part
-struct Context<Type: Reflectable> {
+struct Context<Type: Buildable> {
     private let builder: Builder<Type>
     private(set) var path: [CodingKey]
 
@@ -37,8 +37,8 @@ struct Context<Type: Reflectable> {
     }
 }
 
-class TypeDecoder<Root: Reflectable> {
-    class KeyedContainer<Key: CodingKey, Type: Reflectable> {
+class TypeDecoder<Root: Buildable> {
+    class KeyedContainer<Key: CodingKey, Type: Buildable> {
         private let decoder: TypeDecoder<Type>
         private(set) var codingPath: [CodingKey]
         var userInfo: [CodingUserInfoKey: Any] = [:]

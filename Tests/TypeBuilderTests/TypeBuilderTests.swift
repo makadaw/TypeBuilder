@@ -3,37 +3,91 @@ import XCTest
 
 final class TypeBuilderTests: XCTestCase {
 
-    struct MyStruct: Codable, Reflectable {
+    struct MyStruct: Buildable {
         let text: String?
-        let number: Int
+        var number: Int
     }
 
-    func testSimpleProperties() {
-        var builder = Builder<MyStruct>()
-        builder[\.text] = "String"
-        builder[\.number] = 111
-
-        XCTAssertEqual(builder[\.text], "String")
-        XCTAssertEqual(builder[\.number], 111)
+    struct NestedLevel: Buildable {
+        let second_nested: MyStruct
     }
 
-    func testWrongTypesAccess() {
-        var builder = Builder<MyStruct>()
-        // Throw error if value didn't set
-        XCTAssertThrowsError(try builder.value(for: \.text))
-        XCTAssertThrowsError(try builder.value(for: \.number))
-        builder[\.text] = nil
-        builder[\.number] = 2
-        // Do not throw if we set nil for optional
-        XCTAssertNoThrow(try builder.value(for: \.text))
-        XCTAssertNoThrow(try builder.value(for: \.number))
+    struct ParentStruct: Buildable {
+        let nested: NestedLevel
+    }
 
-        XCTAssertNil(builder[\.text])
-        XCTAssertEqual(builder[\.number], 2)
+    func testDirectProperties() {
+        let builder = Builder<MyStruct>()
+        builder.number = 123
+        builder.text = "Text"
+
+        XCTAssertEqual(builder.number, 123)
+        XCTAssertEqual(builder.text, "Text")
+    }
+
+    func testNestedProperties() {
+        let builder = Builder<ParentStruct>()
+
+        builder.nested.second_nested.number = 10
+        builder.nested.second_nested.text = "Text"
+
+        XCTAssertNotNil(builder.nested.second_nested, "keyPath that point to not ReflectionDecodable need to return a lens")
+        XCTAssertEqual(builder.nested.second_nested.number, 10, "keyPath that point to ReflectionDecodable need to return a value")
+        XCTAssertEqual(builder.nested.second_nested.text, "Text")
+
+    }
+
+    func testNilProperties() {
+        let builder = Builder<MyStruct>()
+
+        XCTAssertNil(builder.number)
+        XCTAssertNil(builder.text)
+    }
+
+    struct StringCodingKey: CodingKey {
+        let intValue: Int? = nil
+        let stringValue: String
+
+        init(_ str: String) {
+            stringValue = str
+        }
+
+        init?(stringValue: String) {
+            self.stringValue = stringValue
+        }
+
+        init?(intValue: Int) {
+            return nil
+        }
+    }
+
+    func testCodingAccess() {
+        let builder = Builder<MyStruct>()
+
+        XCTAssertFalse(try builder.contains([StringCodingKey("text")]))
+        XCTAssertThrowsError(try builder.value(for: [StringCodingKey("text")]) as Int,
+                             "value by CodingKey throw if nothing is set")
+
+        builder.text = "Hello"
+        XCTAssertTrue(try builder.contains([StringCodingKey("text")]))
+        XCTAssertEqual(try builder.value(for: [StringCodingKey("text")]), "Hello")
+    }
+
+    func testCodingNilAccess() {
+        let builder = Builder<MyStruct>()
+
+        XCTAssertThrowsError(try builder.isNil([StringCodingKey("text")]))
+
+        builder.text = nil
+        XCTAssertNoThrow(try builder.isNil([StringCodingKey("text")]))
+        XCTAssertTrue(try builder.isNil([StringCodingKey("text")]))
     }
 
     static var allTests = [
-        ("testSimpleProperties", testSimpleProperties),
-        ("testWrongTypesAccess", testWrongTypesAccess)
+        ("testDirectProperties", testDirectProperties),
+        ("testNestedProperties", testNestedProperties),
+        ("testNilProperties", testNilProperties),
+        ("testCodingAccess", testCodingAccess),
+        ("testCodingNilAccess", testCodingNilAccess),
     ]
 }
