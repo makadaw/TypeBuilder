@@ -34,13 +34,17 @@ final class TypeBuilderTests: XCTestCase {
         XCTAssertNotNil(builder.nested.second_nested, "keyPath that point to not ReflectionDecodable need to return a lens")
         XCTAssertEqual(builder.nested.second_nested.number, 10, "keyPath that point to ReflectionDecodable need to return a value")
         XCTAssertEqual(builder.nested.second_nested.text, "Text")
-
     }
 
     func testNilProperties() {
         let builder = Builder<MyStruct>()
 
-        XCTAssertNil(builder.number)
+        // Set optional value
+        builder.text = "text"
+        XCTAssertEqual(builder.text, "text")
+
+        // Reset optional value need to return nil
+        builder.text = nil
         XCTAssertNil(builder.text)
     }
 

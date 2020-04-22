@@ -8,124 +8,203 @@ import Foundation
 public typealias Buildable = Reflectable & Codable
 
 @dynamicMemberLookup
-public struct KeyPathLens<Root: Buildable, Type> {
+public struct KeyPathLens<Root: Buildable, CurrentType> {
     let builder: Builder<Root>
-    let parent: KeyPath<Root, Type>
+    let parent: KeyPath<Root, CurrentType>
 
-    public subscript<T>(dynamicMember keyPath: KeyPath<Type, T>) -> T? where T: ReflectionDecodable {
+    /// MARK: Subscripts
+    public subscript<T>(dynamicMember keyPath: KeyPath<CurrentType, T>) -> KeyPathLens<Root, T> {
         get {
-            return try? builder.value(for: parent.appending(path: keyPath))
+            let finalKeyPath = parent.appending(path: keyPath)
+            return builder.lens(for: finalKeyPath)
         }
         set {
-            let fullKeyPath = parent.appending(path: keyPath)
+            let finalKeyPath = parent.appending(path: keyPath)
+            builder.setLens(newValue, for: finalKeyPath)
+        }
+    }
+
+    public subscript<T>(dynamicMember keyPath: KeyPath<CurrentType, T>) -> T where T: ReflectionDecodable {
+        get {
             do {
-                try builder.updateValue(fullKeyPath, value: newValue)
-            } catch (_) {
-                print("Can't update value for key path \(fullKeyPath), but subscript can't throw")
+                return try value(for: keyPath)
+            } catch {
+                fatalError("Value for \(keyPath) is nil, subscript is not throwable \(error)")
+            }
+        }
+        set {
+            do {
+                try updateValue(keyPath, value: newValue)
+            } catch {
+                fatalError("Can't update value for key path \(keyPath), but subscript can't throw")
             }
         }
     }
 
-    public subscript<T>(dynamicMember keyPath: KeyPath<Type, T?>) -> T? where T: ReflectionDecodable {
+    public subscript<T>(dynamicMember keyPath: KeyPath<CurrentType, T?>) -> T? where T: ReflectionDecodable {
         get {
-            return try? builder.value(for: parent.appending(path: keyPath))
+            do {
+                return try value(for: keyPath)
+            } catch {
+                fatalError("Value for \(keyPath) is nil, subscript is not throwable \(error)")
+            }
         }
         set {
-            let fullKeyPath = parent.appending(path: keyPath)
             do {
-                try builder.updateValue(fullKeyPath, value: newValue)
-            } catch (_) {
-                print("Can't update value for key path \(fullKeyPath), but subscript can't throw")
+                try updateValue(keyPath, value: newValue)
+            } catch {
+                fatalError("Can't update value for key path \(keyPath), but subscript can't throw")
             }
         }
     }
 
-    public subscript<T>(dynamicMember keyPath: KeyPath<Type, T>) -> KeyPathLens<Root, T> where T: Buildable {
-        get {
-            return builder.lens(for: parent.appending(path: keyPath))
-        }
-        set {
-            // TODO
-            // For now just ignore lenses assign
-        }
+    /// MARK: Values
+    func value<T>(for keyPath: KeyPath<CurrentType, T>) throws -> T {
+        let finalKeyPath = parent.appending(path: keyPath)
+        return try builder.value(for: finalKeyPath)
+    }
+
+    func value<T>(for keyPath: KeyPath<CurrentType, T?>) throws -> T? {
+        let finalKeyPath = parent.appending(path: keyPath)
+        return try builder.value(for: finalKeyPath)
+    }
+
+    func updateValue<T: ReflectionDecodable>(_ keyPath: KeyPath<CurrentType, T>, value: T) throws {
+        let finalKeyPath = parent.appending(path: keyPath)
+        try builder.updateValue(finalKeyPath, value: value)
+    }
+
+    func updateValue<T: ReflectionDecodable>(_ keyPath: KeyPath<CurrentType, T?>, value: T?) throws {
+        let finalKeyPath = parent.appending(path: keyPath)
+        try builder.updateValue(finalKeyPath, value: value)
     }
 }
 
-/// Type safe builder for type
 @dynamicMemberLookup
-public class Builder<Type: Buildable> {
+public class Builder<Root: Buildable> {
 
     public enum Error<Value>: Swift.Error {
         case missingKey(String, type: Value)
-        case missingKeyPath(KeyPath<Type, Value>)
-        case nonReflectableKeyPath(KeyPath<Type, Value>)
-        case missingPartialKeyPath(PartialKeyPath<Type>, Value)
-        case invalidValueType(key: PartialKeyPath<Type>, excpect: Value, actualValue: Any?)
+        case missingKeyPath(KeyPath<Root, Value>)
+        case nonReflectableKeyPath(KeyPath<Root, Value>)
+        case missingPartialKeyPath(PartialKeyPath<Root>, Value)
+        case invalidValueType(key: PartialKeyPath<Root>, excpect: Value, actualValue: Any?)
+        case valueIsNil(key: PartialKeyPath<Root>, excpect: Value)
     }
 
-    private var storage = [PartialKeyPath<Type>: Any?]()
-    private var reflectableKeyPaths = [String: PartialKeyPath<Type>]()
-
-    /// MARK: Value access
-    func updateValue<T: ReflectionDecodable>(_ keyPath: KeyPath<Type, T>, value: T?) throws {
-        guard let property = try? Type.reflectProperty(forKey: keyPath) else {
-            throw Error.nonReflectableKeyPath(keyPath)
-        }
-        storage.updateValue(value, forKey: keyPath)
-        reflectableKeyPaths[property.stringKeyPath] = keyPath
+    enum Value<T> {
+        case none
+        case value(T)
     }
 
-    func value<T>(for keyPath: KeyPath<Type, T>) throws -> T {
-        guard let value = storage[keyPath] else {
-            throw Error.missingKeyPath(keyPath)
-        }
-        guard let typed = value as? T else {
-            throw Error.invalidValueType(key: keyPath, excpect: T.self, actualValue: value)
-        }
-        return typed
-    }
+    private var storage = [PartialKeyPath<Root>: Value<Any>]()
+    private var reflectableKeyPaths = [String: PartialKeyPath<Root>]()
 
     /// MARK: Subscripts
-    // TODO Combine with Lens subscripts
-    public subscript<T>(dynamicMember keyPath: KeyPath<Type, T>) -> T? where T: ReflectionDecodable {
-        get {
-            return try? value(for: keyPath)
-        }
-        set {
-            do {
-                try updateValue(keyPath, value: newValue)
-            } catch (_) {
-                print("Can't update value for key path \(keyPath), but subscript can't throw")
-            }
-        }
-    }
-
-    public subscript<T>(dynamicMember keyPath: KeyPath<Type, T?>) -> T? where T: ReflectionDecodable {
-        get {
-            return try? value(for: keyPath)
-        }
-        set {
-            do {
-                try updateValue(keyPath, value: newValue)
-            } catch (_) {
-                print("Can't update value for key path \(keyPath), but subscript can't throw")
-            }
-        }
-    }
-
-    public subscript<T>(dynamicMember keyPath: KeyPath<Type, T>) -> KeyPathLens<Type, T> {
+    public subscript<T>(dynamicMember keyPath: KeyPath<Root, T>) -> KeyPathLens<Root, T> {
         get {
             return lens(for: keyPath)
         }
         set {
-            // TODO
-            // For now just ignore lenses assign
+            setLens(newValue, for: keyPath)
         }
     }
 
+    public subscript<T>(dynamicMember keyPath: KeyPath<Root, T>) -> T where T: ReflectionDecodable {
+        get {
+            do {
+                return try value(for: keyPath)
+            } catch {
+                fatalError("Value for \(keyPath) is nil, subscript is not throwable \(error)")
+            }
+        }
+        set {
+            do {
+                try updateValue(keyPath, value: newValue)
+            } catch {
+                fatalError("Can't update value for key path \(keyPath), but subscript can't throw")
+            }
+        }
+    }
+
+    public subscript<T>(dynamicMember keyPath: KeyPath<Root, T?>) -> T? where T: ReflectionDecodable {
+        get {
+            do {
+                return try value(for: keyPath)
+            } catch {
+                fatalError("Value for \(keyPath) is nil, subscript is not throwable \(error)")
+            }
+        }
+        set {
+            do {
+                try updateValue(keyPath, value: newValue)
+            } catch {
+                fatalError("Can't update value for key path \(keyPath), but subscript can't throw")
+            }
+        }
+    }
+
+    /// MARK: Value storage
+    public func value<T>(for keyPath: KeyPath<Root, T>) throws -> T {
+        guard let wrapper = storage[keyPath] else {
+            throw Error.missingKeyPath(keyPath)
+        }
+        switch wrapper {
+        case .none:
+            throw Error.valueIsNil(key: keyPath, excpect: T.self)
+        case let .value(value):
+            guard let typed = value as? T else {
+                throw Error.invalidValueType(key: keyPath, excpect: T.self, actualValue: value)
+            }
+            return typed
+       }
+    }
+
+    public func value<T>(for keyPath: KeyPath<Root, T?>) throws -> T? {
+        guard let wrapper = storage[keyPath] else {
+             throw Error.missingKeyPath(keyPath)
+        }
+        switch wrapper {
+        case .none:
+            return nil
+        case let .value(value):
+            guard let typed = value as? T else {
+                throw Error.invalidValueType(key: keyPath, excpect: T.self, actualValue: value)
+            }
+            return typed
+        }
+    }
+
+    public func updateValue<T: ReflectionDecodable>(_ keyPath: KeyPath<Root, T>, value: T) throws {
+        try updateValue(keyPath, value: .value(value))
+    }
+
+    public func updateValue<T: ReflectionDecodable>(_ keyPath: KeyPath<Root, T?>, value: T?) throws {
+        let setValue: Value<Any>
+        if let value = value {
+            setValue = .value(value)
+        } else {
+            setValue = .none
+        }
+        try updateValue(keyPath, value: setValue)
+    }
+
+    func updateValue<T: ReflectionDecodable>(_ keyPath: KeyPath<Root, T>, value: Value<Any>) throws {
+        guard let property = try? Root.reflectProperty(forKey: keyPath) else {
+            throw Error.nonReflectableKeyPath(keyPath)
+        }
+        storage[keyPath] = value
+        reflectableKeyPaths[property.stringKeyPath] = keyPath
+    }
+
     /// MARK: Lenses
-    func lens<T>(for keyPath: KeyPath<Type, T>) -> KeyPathLens<Type, T> {
-        return KeyPathLens<Type, T>(builder: self, parent: keyPath)
+    func lens<T>(for keyPath: KeyPath<Root, T>) -> KeyPathLens<Root, T> {
+        return KeyPathLens<Root, T>(builder: self, parent: keyPath)
+    }
+
+    func setLens<T>(_ lens: KeyPathLens<Root, T>, for keyPath: KeyPath<Root, T>) {
+        // TODO
+        // For now just ignore lenses assign
     }
 }
 
@@ -140,13 +219,11 @@ extension Builder {
         guard let keyPath = reflectableKeyPaths[key] else {
             throw Error.missingKey(key, type: Any.Type.self)
         }
-        switch storage[keyPath] ?? .none {
-        case .none:
+        guard let val = storage[keyPath],
+            case .value = val else {
             return true
-        case .some(let value):
-            // TODO check is optional is nil
-            return value == nil
         }
+        return false
     }
 
     func contains(_ path: [CodingKey]) throws -> Bool {
@@ -162,7 +239,8 @@ extension Builder {
         guard let keyPath = reflectableKeyPaths[key] else {
             throw Error.missingKey(key, type: T.self)
         }
-        guard let value = storage[keyPath] else {
+        guard let wrapper = storage[keyPath],
+            case let .value(value) = wrapper else {
             throw Error.missingPartialKeyPath(keyPath, T.self)
         }
         guard let typed = value as? T else {
@@ -173,9 +251,9 @@ extension Builder {
 }
 
 public extension Builder {
-    func build() throws -> Type {
-        let decoder = TypeDecoder<Type>(builder: self)
-        return try Type(from: decoder)
+    func build() throws -> Root {
+        let decoder = TypeDecoder<Root>(builder: self)
+        return try Root(from: decoder)
     }
 }
 

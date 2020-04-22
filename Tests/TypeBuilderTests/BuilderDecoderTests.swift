@@ -17,7 +17,6 @@ final class BuilderDecoderTests: XCTestCase {
         builder.float = 3.14
         builder.bool = true
         builder.optional = "Optional"
-//        builder.optional = nil
 
         var obj: Struct!
         XCTAssertNoThrow(obj = try builder.build())
@@ -25,7 +24,11 @@ final class BuilderDecoderTests: XCTestCase {
         XCTAssertEqual(obj.int, 42)
         XCTAssertEqual(obj.float, 3.14)
         XCTAssertEqual(obj.bool, true)
-//        XCTAssertNil(obj.optional)
+        XCTAssertEqual(obj.optional, "Optional")
+
+        builder.optional = nil
+        XCTAssertNoThrow(obj = try builder.build())
+        XCTAssertNil(obj.optional)
     }
 
     func testNestedObjects() {
@@ -41,8 +44,8 @@ final class BuilderDecoderTests: XCTestCase {
         builder.string = "String"
         builder.nested.int = 42
 
-        var obj: Struct!
-        XCTAssertNoThrow(obj = try builder.build())
+        let obj = try! builder.build()
+        XCTAssertNotNil(obj)
         XCTAssertEqual(obj.string, "String")
         XCTAssertEqual(obj.nested.int, 42)
     }
